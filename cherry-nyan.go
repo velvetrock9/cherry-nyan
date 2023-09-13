@@ -33,6 +33,7 @@ type model struct {
 	errorMessage string
 }
 
+// Initial model state
 func initialModel() model {
 	ti := textinput.New()
 	ti.Placeholder = "Enter search tag( rock / metal / pop / space / jungle / etc)"
@@ -59,6 +60,7 @@ func getStationURL(stationTag string) (string, string, error) {
 
 	baseURL := "http://all.api.radio-browser.info/json/stations/search"
 
+	// Processing baseURL  and query arguments through url package for safety reasons
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		return "", "", err
@@ -96,6 +98,7 @@ func getStationURL(stationTag string) (string, string, error) {
 	return "", "", err
 }
 
+// Connects to chosen radio station http stream
 func connectRadio(stationUrl string) (beep.StreamSeekCloser, error) {
 
 	stream, err := http.Get(stationUrl)
@@ -117,10 +120,15 @@ func connectRadio(stationUrl string) (beep.StreamSeekCloser, error) {
 
 }
 
+// Update model state. Mostly describes logic which happens during keyboard events.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
-	// When in Search mode, turn j and k controls into actual letters again
+	/*
+	   Though not DRY, this code block is required, until concurrency implementation,
+	   so the Search context could react on Enter and not interpret j k keys as controls.
+	*/
+
 	if m.searching {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
@@ -170,7 +178,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Handle normal controls when NOT in searching mode
+	// Handle normal controls when NOT in a Search mode
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -214,6 +222,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// Describes View logic.
 func (m model) View() string {
 	s := ""
 	for i, control := range m.controls {
@@ -242,6 +251,7 @@ func (m model) View() string {
 	return s
 }
 
+// Main goroutine
 func main() {
 
 	p := tea.NewProgram(initialModel())
