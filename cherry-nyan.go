@@ -2,24 +2,25 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/faiface/beep"
 	"github.com/faiface/beep/mp3"
 	"github.com/faiface/beep/speaker"
-	"io"
+	"github.com/velvetrock9/cherry-nyan/parse"
 	"log"
-	"math/rand"
 	"net/http"
-	"net/url"
 	"os"
+	"strings"
 	"time"
 )
 
-type Station struct {
+type station struct {
 	URL  string `json:"url"`
 	Name string `json:"name"`
+	Tag  string `json:"tags"`
 }
 
 type model struct {
@@ -27,7 +28,7 @@ type model struct {
 	cursor       int
 	playing      bool
 	streamer     beep.StreamSeekCloser
-	radioStation Station
+	radioStation station
 	textInput    textinput.Model
 	searching    bool
 	errorMessage string
@@ -44,9 +45,10 @@ func initialModel() model {
 	return model{
 		controls: []string{"Play", "Search", "Exit"},
 		playing:  false,
-		radioStation: Station{
+		radioStation: station{
 			URL:  "https://rautemusik-de-hz-fal-stream15.radiohost.de/12punks?ref=radiobrowser",
 			Name: "12 punks (default)",
+			Tag:  "punk",
 		},
 		textInput: ti,
 	}
@@ -56,52 +58,51 @@ func (m model) Init() tea.Cmd {
 	return nil
 }
 
-func getStationURL(stationTag string) (string, string, error) {
+func unify(input string) string {
+	s := ""
+	s = strings.TrimSpace(input)
+	s = strings.ToLower(s)
+	return s
+}
 
-	baseURL := "http://all.api.radio-browser.info/json/stations/search"
+func findStation(userTag string) *station {
 
-	// Processing baseURL  and query arguments through url package for safety reasons
-	u, err := url.Parse(baseURL)
+	f, err := os.ReadFile("stations.json")
 	if err != nil {
-		return "", "", err
+		if errors.Is(err, os.ErrNotExist) {
+			parse.ParseStations()
+
+		} else if errors.Is(err, os.ErrPermission) {
+			fmt.Errorf(`something is wrong with your stations.json
+permissions or its containing directory`)
+		} else {
+			panic(err)
+		}
 	}
-
-	q := u.Query()
-	q.Set("codec", "MP3")
-	q.Set("lastcheckok", "1")
-	q.Set("tag", stationTag)
-
-	u.RawQuery = q.Encode()
-
-	resp, err := http.Get(u.String())
 	if err != nil {
-		return "", "", err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", "", err
+		log.Fatal("unable to read stations.json")
 	}
 
-	var stations []Station
+	var stations []station
 
-	err = json.Unmarshal(body, &stations)
-	if err != nil {
-		return "", "", err
+	if err := json.Unmarshal(f, &stations); err != nil {
+		log.Fatalf("Failed to unmarshal JSON data: %v", err)
 	}
-
-	if len(stations) > 0 {
-		n := rand.Intn(len(stations))
-		return stations[n].URL, stations[n].Name, nil
+	s := station{URL: "", Name: "", Tag: ""}
+	for _, st := range stations {
+		if strings.Contains(unify(st.Tag), unify(userTag)) {
+			s = station{URL: st.URL, Name: st.Name, Tag: st.Tag}
+			fmt.Println(s)
+			return &s
+		}
 	}
-	return "", "", err
+	return &s
 }
 
 // Connects to chosen radio station http stream
-func connectRadio(stationUrl string) (beep.StreamSeekCloser, error) {
+func connectRadio(url string) (beep.StreamSeekCloser, error) {
 
-	stream, err := http.Get(stationUrl)
+	stream, err := http.Get(url)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -110,8 +111,6 @@ func connectRadio(stationUrl string) (beep.StreamSeekCloser, error) {
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	//	defer streamer.Close()
 
 	speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
 	speaker.Play(streamer)
@@ -145,12 +144,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				var err error
-				m.radioStation.URL, m.radioStation.Name, err = getStationURL(tag)
-				if err != nil || m.radioStation.URL == "" {
-					m.errorMessage = ("Error: response given by radio API is empty or error")
+				station := findStation(tag)
+
+				if err != nil || station.URL == "" {
+					m.errorMessage = fmt.Sprintf("Error: no station with a tag %v", tag)
 					return m, nil
 				}
-
+				m.radioStation = *station
 				// Stop the radio
 				if m.streamer != nil {
 					m.streamer.Close()
