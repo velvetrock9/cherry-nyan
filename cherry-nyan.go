@@ -1,38 +1,42 @@
 package main
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/faiface/beep"
-	"github.com/faiface/beep/mp3"
-	"github.com/faiface/beep/speaker"
+	"github.com/velvetrock9/cherry-nyan/connect"
+	"github.com/velvetrock9/cherry-nyan/icy"
 	"github.com/velvetrock9/cherry-nyan/parse"
 	"log"
-	"net/http"
 	"os"
-	"strings"
 	"time"
 )
-
-type station struct {
-	URL  string `json:"url"`
-	Name string `json:"name"`
-	Tag  string `json:"tags"`
-}
 
 type model struct {
 	controls     []string
 	cursor       int
 	playing      bool
 	streamer     beep.StreamSeekCloser
-	radioStation station
+	radioStation parse.Station
 	textInput    textinput.Model
 	searching    bool
 	errorMessage string
+	songTitle    string
 }
+
+func doTick(radioStation string) tea.Cmd {
+	return tea.Tick(time.Second*7, func(t time.Time) tea.Msg {
+
+		message, err := icy.GrabSongTitle(radioStation)
+		if err != nil {
+			fmt.Println(err)
+		}
+		return TickMsg(message)
+	})
+}
+
+type TickMsg string
 
 // Initial model state
 func initialModel() model {
@@ -45,78 +49,18 @@ func initialModel() model {
 	return model{
 		controls: []string{"Play", "Search", "Exit"},
 		playing:  false,
-		radioStation: station{
+		radioStation: parse.Station{
 			URL:  "https://rautemusik-de-hz-fal-stream15.radiohost.de/12punks?ref=radiobrowser",
 			Name: "12 punks (default)",
-			Tag:  "punk",
+			Tags: "punk",
 		},
 		textInput: ti,
+		songTitle: "InitialModel Song Title",
 	}
 }
 
 func (m model) Init() tea.Cmd {
-	return nil
-}
-
-func unify(input string) string {
-	s := ""
-	s = strings.TrimSpace(input)
-	s = strings.ToLower(s)
-	return s
-}
-
-func findStation(userTag string) *station {
-
-	f, err := os.ReadFile("stations.json")
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			parse.ParseStations()
-
-		} else if errors.Is(err, os.ErrPermission) {
-			fmt.Errorf(`something is wrong with your stations.json
-permissions or its containing directory`)
-		} else {
-			panic(err)
-		}
-	}
-	if err != nil {
-		log.Fatal("unable to read stations.json")
-	}
-
-	var stations []station
-
-	if err := json.Unmarshal(f, &stations); err != nil {
-		log.Fatalf("Failed to unmarshal JSON data: %v", err)
-	}
-	s := station{URL: "", Name: "", Tag: ""}
-	for _, st := range stations {
-		if strings.Contains(unify(st.Tag), unify(userTag)) {
-			s = station{URL: st.URL, Name: st.Name, Tag: st.Tag}
-			fmt.Println(s)
-			return &s
-		}
-	}
-	return &s
-}
-
-// Connects to chosen radio station http stream
-func connectRadio(url string) (beep.StreamSeekCloser, error) {
-
-	stream, err := http.Get(url)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	streamer, format, err := mp3.Decode(stream.Body)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
-	speaker.Play(streamer)
-
-	return streamer, nil
-
+	return doTick(m.radioStation.URL)
 }
 
 // Update model state. Mostly describes logic which happens during keyboard events.
@@ -144,7 +88,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				var err error
-				station := findStation(tag)
+				station := parse.FindStation(tag)
 
 				if err != nil || station.URL == "" {
 					m.errorMessage = fmt.Sprintf("Error: no station with a tag %v", tag)
@@ -158,7 +102,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.playing = false
 				}
 
-				streamer, err := connectRadio(m.radioStation.URL)
+				streamer, err := connect.ConnectRadio(m.radioStation.URL)
 				if err != nil {
 					// Handle the error
 					log.Fatal(err)
@@ -180,6 +124,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Handle normal controls when NOT in a Search mode
 	switch msg := msg.(type) {
+	case TickMsg:
+		m.songTitle = string(msg)
+		return m, doTick(m.radioStation.URL)
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
@@ -210,7 +157,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.playing = false
 				}
 			} else {
-				streamer, err := connectRadio(m.radioStation.URL)
+				streamer, err := connect.ConnectRadio(m.radioStation.URL)
 				if err != nil {
 					log.Fatal(err)
 				}
@@ -243,6 +190,7 @@ func (m model) View() string {
 	}
 	if m.playing {
 		s += fmt.Sprintf("\nNow Playing: %s\n", m.radioStation.Name)
+		s += fmt.Sprintf("SongTitle: %s", m.songTitle)
 	}
 	s += "\nPress Exit or q to quit.\n"
 	if m.searching {

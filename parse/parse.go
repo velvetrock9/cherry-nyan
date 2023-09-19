@@ -2,10 +2,14 @@ package parse
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"errors"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
+	"os"
+	"strings"
 )
 
 const apiEndpoint = "http://all.api.radio-browser.info/json/stations/search"
@@ -40,6 +44,13 @@ type Station struct {
 	HasExtendedInfo bool     `json:"has_extended_info"`
 }
 
+func unify(input string) string {
+	s := ""
+	s = strings.TrimSpace(input)
+	s = strings.ToLower(s)
+	return s
+}
+
 func ParseStations() error {
 
 	// Processing baseURL  and query arguments through url package for safety reasons
@@ -60,7 +71,7 @@ func ParseStations() error {
 	}
 	defer resp.Body.Close()
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Fatalf("Failed to read response body: %v", err)
 	}
@@ -76,7 +87,7 @@ func ParseStations() error {
 	}
 
 	filePath := "stations.json"
-	err = ioutil.WriteFile(filePath, data, 0644)
+	err = os.WriteFile(filePath, data, 0644)
 	if err != nil {
 		log.Fatalf("Failed to write data to %s: %v", filePath, err)
 	}
@@ -84,4 +95,37 @@ func ParseStations() error {
 	log.Println("Data successfully written to stations.json")
 
 	return nil
+}
+
+func FindStation(userTag string) *Station {
+
+	f, err := os.ReadFile("stations.json")
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			ParseStations()
+
+		} else if errors.Is(err, os.ErrPermission) {
+			fmt.Errorf(`something is wrong with your stations.json
+permissions or its containing directory`)
+		} else {
+			panic(err)
+		}
+	}
+	if err != nil {
+		log.Fatal("unable to read stations.json")
+	}
+
+	var stations []Station
+
+	if err := json.Unmarshal(f, &stations); err != nil {
+		log.Fatalf("Failed to unmarshal JSON data: %v", err)
+	}
+	s := Station{URL: "", Name: "", Tags: ""}
+	for _, st := range stations {
+		if strings.Contains(unify(st.Tags), unify(userTag)) {
+			s = Station{URL: st.URL, Name: st.Name, Tags: st.Tags}
+			return &s
+		}
+	}
+	return &s
 }
