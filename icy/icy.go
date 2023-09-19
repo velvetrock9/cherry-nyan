@@ -29,7 +29,8 @@ func GrabSongTitle(url string) (string, error) {
 		}
 		return string(m[13 : len(m)-1]), nil
 	}
-	return "", fmt.Errorf("Empty return")
+
+	return `¯\_(ツ)_/¯`, fmt.Errorf("Empty return")
 }
 
 // get stream metadatas

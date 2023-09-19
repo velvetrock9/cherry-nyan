@@ -47,7 +47,7 @@ func initialModel() model {
 	ti.Width = 20
 
 	return model{
-		controls: []string{"Play", "Search", "Exit"},
+		controls: []string{"▶️ Play", "🔎 Search", "🔚 Exit"},
 		playing:  false,
 		radioStation: parse.Station{
 			URL:  "https://rautemusik-de-hz-fal-stream15.radiohost.de/12punks?ref=radiobrowser",
@@ -55,7 +55,6 @@ func initialModel() model {
 			Tags: "punk",
 		},
 		textInput: ti,
-		songTitle: "InitialModel Song Title",
 	}
 }
 
@@ -76,8 +75,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch msg.String() {
-			case "ctrl+c", "q":
+			case "ctrl+c":
 				return m, tea.Quit
+			case "esc":
+				m.textInput.SetValue("")
+				m.searching = false
 			case "enter":
 
 				// Handling the Enter key to complete the search
@@ -108,6 +110,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					log.Fatal(err)
 				}
 				m.streamer = streamer
+				// Reset song title after connecting to new station
+				m.songTitle = ""
 				m.playing = true
 
 				// After processing the tag, reset the input and hide it.
@@ -125,17 +129,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle normal controls when NOT in a Search mode
 	switch msg := msg.(type) {
 	case TickMsg:
-		m.songTitle = string(msg)
+		if string(msg) == "" {
+			m.songTitle = `¯\_(ツ)_/¯`
+		} else {
+			m.songTitle = string(msg)
+		}
 		return m, doTick(m.radioStation.URL)
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c":
 			return m, tea.Quit
-		case "up", "k", "ctrl+p":
+		case "left", "h", "ctrl+b":
 			if m.cursor > 0 {
 				m.cursor--
 			}
-		case "down", "j", "ctrl+n":
+		case "right", "l", "ctrl+f":
 			if m.cursor < len(m.controls)-1 {
 				m.cursor++
 			}
@@ -172,6 +180,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // Describes View logic.
 func (m model) View() string {
 	s := ""
+	s += fmt.Sprintf("\n\n")
 	for i, control := range m.controls {
 		cursor := " "
 		if m.cursor == i {
@@ -180,19 +189,19 @@ func (m model) View() string {
 
 		if i == 0 {
 			if m.playing {
-				control = "Pause"
+				control = "⏸️ Pause"
 			} else {
-				control = "Play"
+				control = "▶️ Play"
 			}
 		}
 
-		s += fmt.Sprintf("%s %s\n", cursor, control)
+		s += fmt.Sprintf("%s %s", cursor, control)
 	}
 	if m.playing {
-		s += fmt.Sprintf("\nNow Playing: %s\n", m.radioStation.Name)
-		s += fmt.Sprintf("SongTitle: %s", m.songTitle)
+		s += fmt.Sprintf("\n\n")
+		s += fmt.Sprintf("📻 Radio: %s\n", m.radioStation.Name)
+		s += fmt.Sprintf("🎶 Track: %s\n", m.songTitle)
 	}
-	s += "\nPress Exit or q to quit.\n"
 	if m.searching {
 		s += "\n" + m.textInput.View()
 	}
