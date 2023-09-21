@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -52,11 +51,9 @@ func unify(input string) string {
 }
 
 func ParseStations() error {
-
-	// Processing baseURL  and query arguments through url package for safety reasons
 	u, err := url.Parse(apiEndpoint)
 	if err != nil {
-		log.Fatalf("Failed to parse Radio API Endpoint: %v", err)
+		return fmt.Errorf("Failed to parse Radio API Endpoint: %v", err)
 	}
 
 	q := u.Query()
@@ -67,65 +64,65 @@ func ParseStations() error {
 
 	resp, err := http.Get(u.String())
 	if err != nil {
-		return err
+		return fmt.Errorf("Failed to make HTTP request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalf("Failed to read response body: %v", err)
+		return fmt.Errorf("Failed to read response body: %v", err)
 	}
 
 	var stations []Station
 	if err := json.Unmarshal(body, &stations); err != nil {
-		log.Fatalf("Failed to unmarshal JSON data: %v", err)
+		return fmt.Errorf("Failed to unmarshal JSON data: %v", err)
 	}
 
 	data, err := json.MarshalIndent(stations, "", "  ")
 	if err != nil {
-		log.Fatalf("Failed to marshal data into JSON: %v", err)
+		return fmt.Errorf("Failed to marshal data into JSON: %v", err)
 	}
 
 	filePath := "stations.json"
-	err = os.WriteFile(filePath, data, 0644)
-	if err != nil {
-		log.Fatalf("Failed to write data to %s: %v", filePath, err)
+	if err := os.WriteFile(filePath, data, 0644); err != nil {
+		return fmt.Errorf("Failed to write data to %s: %v", filePath, err)
 	}
 
-	log.Println("Data successfully written to stations.json")
+	fmt.Println("Data has been successfully written to stations.json")
+	fmt.Println("Start the search again, please")
 
 	return nil
 }
 
-func FindStation(userTag string) *Station {
-
+func FindStation(userTag string) (*Station, error) {
 	f, err := os.ReadFile("stations.json")
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			ParseStations()
-
+			return nil, fmt.Errorf("Stations.json not found")
 		} else if errors.Is(err, os.ErrPermission) {
-			fmt.Errorf(`something is wrong with your stations.json
-permissions or its containing directory`)
+			return nil, fmt.Errorf("Permission issue with stations.json or its containing directory: %v", err)
 		} else {
-			panic(err)
+			return nil, err
 		}
-	}
-	if err != nil {
-		log.Fatal("unable to read stations.json")
 	}
 
 	var stations []Station
-
 	if err := json.Unmarshal(f, &stations); err != nil {
-		log.Fatalf("Failed to unmarshal JSON data: %v", err)
+		fmt.Println("Remaking the stations.json file")
+
+		if err != nil {
+			return nil, fmt.Errorf("Error in stations.json: %v\n", err)
+		}
+
 	}
+
 	s := Station{URL: "", Name: "", Tags: ""}
 	for _, st := range stations {
 		if strings.Contains(unify(st.Tags), unify(userTag)) {
 			s = Station{URL: st.URL, Name: st.Name, Tags: st.Tags}
-			return &s
+			return &s, nil
 		}
 	}
-	return &s
+
+	return &s, nil // If no matching station is found, return an empty station
 }

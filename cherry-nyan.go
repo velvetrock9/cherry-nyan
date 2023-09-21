@@ -20,7 +20,9 @@ type model struct {
 	streamer     beep.StreamSeekCloser
 	radioStation parse.Station
 	textInput    textinput.Model
+	answerInput  textinput.Model
 	searching    bool
+	asking       bool
 	errorMessage string
 	songTitle    string
 }
@@ -40,6 +42,12 @@ type TickMsg string
 
 // Initial model state
 func initialModel() model {
+	answer := textinput.New()
+	answer.Placeholder = "Do you want to generate a new stations.json file? (yes/no)"
+	answer.Focus()
+	answer.CharLimit = 156
+	answer.Width = 20
+
 	ti := textinput.New()
 	ti.Placeholder = "Enter search tag( rock / metal / pop / space / jungle / etc)"
 	ti.Focus()
@@ -54,7 +62,8 @@ func initialModel() model {
 			Name: "12 punks (default)",
 			Tags: "punk",
 		},
-		textInput: ti,
+		textInput:   ti,
+		answerInput: answer,
 	}
 }
 
@@ -65,12 +74,12 @@ func (m model) Init() tea.Cmd {
 // Update model state. Mostly describes logic which happens during keyboard events.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
-
+	var tag string
 	/*
-	   Though not DRY, this code block is required, until concurrency implementation,
-	   so the Search context could react on Enter and not interpret j k keys as controls.
+	   Though not DRY, this code block is required, so the Search context could react on Enter and not react on j k keys as controls.
 	*/
 
+	// Search context
 	if m.searching {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
@@ -78,23 +87,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "ctrl+c":
 				return m, tea.Quit
 			case "esc":
-				m.textInput.SetValue("")
 				m.searching = false
+				fmt.Println("Search context: OFF")
+				return m, cmd
 			case "enter":
-
-				// Handling the Enter key to complete the search
-				tag := m.textInput.Value()
-				if tag == "" {
-					m.errorMessage = "Error: response given by radio API is empty or error"
-					return m, nil
-				}
-
-				var err error
-				station := parse.FindStation(tag)
-
-				if err != nil || station.URL == "" {
-					m.errorMessage = fmt.Sprintf("Error: no station with a tag %v", tag)
-					return m, nil
+				tag = m.textInput.Value()
+				m.searching = false
+				// Main logic of finding an appropriate station and connecting to it
+				station, err := parse.FindStation(tag)
+				if err != nil {
+					fmt.Printf("\nError: %v\n", err)
+					fmt.Println("Rebuilding list of radio stations...")
+					parse.ParseStations()
+					return m, cmd
 				}
 				m.radioStation = *station
 				// Stop the radio
@@ -113,20 +118,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Reset song title after connecting to new station
 				m.songTitle = ""
 				m.playing = true
-
-				// After processing the tag, reset the input and hide it.
-				m.textInput.SetValue("")
-				m.searching = false
-
-				return m, nil
+				return m, cmd
 			default:
 				m.textInput, cmd = m.textInput.Update(msg)
 				return m, cmd
 			}
 		}
+
 	}
 
-	// Handle normal controls when NOT in a Search mode
 	switch msg := msg.(type) {
 	case TickMsg:
 		if string(msg) == "" {
@@ -174,6 +174,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
+
 	return m, cmd
 }
 
@@ -204,6 +205,9 @@ func (m model) View() string {
 	}
 	if m.searching {
 		s += "\n" + m.textInput.View()
+	}
+	if m.asking {
+		s += "\n" + m.answerInput.View()
 	}
 	return s
 }
