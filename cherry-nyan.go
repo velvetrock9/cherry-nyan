@@ -2,220 +2,247 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"time"
+
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/faiface/beep"
 	"github.com/velvetrock9/cherry-nyan/connect"
 	"github.com/velvetrock9/cherry-nyan/icy"
 	"github.com/velvetrock9/cherry-nyan/parse"
-	"log"
-	"os"
-	"time"
 )
 
+type TickMsg string
+type sessionState uint
+
 type model struct {
-	controls     []string
+	state        sessionState
+	control      string
 	cursor       int
-	playing      bool
 	streamer     beep.StreamSeekCloser
 	radioStation parse.Station
 	textInput    textinput.Model
-	answerInput  textinput.Model
-	searching    bool
-	asking       bool
 	errorMessage string
 	songTitle    string
+	spinner      spinner.Model
+	isLoading    bool
+	isPlaying    bool
 }
 
+const (
+	generalView sessionState = iota
+	searchView
+)
+
+var (
+	helpStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+)
+
+// Tick function, that regularly grabs metadata in ICE format from the same radio stream
 func doTick(radioStation string) tea.Cmd {
 	return tea.Tick(time.Second*7, func(t time.Time) tea.Msg {
 
 		message, err := icy.GrabSongTitle(radioStation)
 		if err != nil {
-			fmt.Println(err)
+			message = fmt.Sprintf("Error: %v", err)
 		}
 		return TickMsg(message)
 	})
 }
 
-type TickMsg string
-
 // Initial model state
-func initialModel() model {
-	answer := textinput.New()
-	answer.Placeholder = "Do you want to generate a new stations.json file? (yes/no)"
-	answer.Focus()
-	answer.CharLimit = 156
-	answer.Width = 20
+func newModel() model {
+	m := model{state: generalView}
 
-	ti := textinput.New()
-	ti.Placeholder = "Enter search tag( rock / metal / pop / space / jungle / etc)"
-	ti.Focus()
-	ti.CharLimit = 156
-	ti.Width = 20
+	m.spinner = spinner.New()
+	m.spinner.Spinner = spinner.Dot
+	m.spinner.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 
-	return model{
-		controls: []string{"▶️ Play", "🔎 Search", "🔚 Exit"},
-		playing:  false,
-		radioStation: parse.Station{
-			URL:  "https://rautemusik-de-hz-fal-stream15.radiohost.de/12punks?ref=radiobrowser",
-			Name: "12 punks (default)",
-			Tags: "punk",
-		},
-		textInput:   ti,
-		answerInput: answer,
+	m.textInput = textinput.New()
+	m.textInput.Placeholder = "Enter search tag(rock / metal / pop / space / jungle / etc)"
+	m.textInput.Focus()
+	m.textInput.CharLimit = 156
+	m.textInput.Width = 20
+
+	m.isPlaying = false
+	m.isLoading = false
+
+	m.radioStation = parse.Station{
+		URL:  "https://rautemusik-de-hz-fal-stream15.radiohost.de/12punks?ref=radiobrowser",
+		Name: "12 punks (default)",
+		Tags: "punk",
 	}
+	return m
+
 }
 
 func (m model) Init() tea.Cmd {
-	return doTick(m.radioStation.URL)
+	cmds := make([]tea.Cmd, 0)
+	cmds = append(cmds, doTick(m.radioStation.URL), m.spinner.Tick)
+	return tea.Sequence(cmds...)
 }
 
-// Update model state. Mostly describes logic which happens during keyboard events.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
-	var tag string
-	/*
-	   Though not DRY, this code block is required, so the Search context could react on Enter and not react on j k keys as controls.
-	*/
+	var cmds []tea.Cmd
 
-	// Search context
-	if m.searching {
-		switch msg := msg.(type) {
-		case tea.KeyMsg:
-			switch msg.String() {
-			case "ctrl+c":
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "tab":
+			if m.state == searchView {
+				m.textInput.SetValue("")
+				m.state = generalView
+			} else if m.state == generalView {
+				m.textInput.SetValue("")
+				m.state = searchView
+			}
+		case "q", "esc":
+			if m.state == searchView {
+				m.textInput.SetValue("")
+				m.state = generalView
+			} else if m.state == generalView {
+				m.textInput.SetValue("")
 				return m, tea.Quit
-			case "esc":
-				m.searching = false
-				fmt.Println("Search context: OFF")
-				return m, cmd
-			case "enter":
-				tag = m.textInput.Value()
-				m.searching = false
-				// Main logic of finding an appropriate station and connecting to it
+			}
+		case "ctrl+c":
+			m.textInput.SetValue("")
+			return m, tea.Quit
+		case "enter", " ":
+			if m.state == searchView {
+				m.state = generalView
+				cmds = append(cmds, m.spinner.Tick)
+				tag := m.textInput.Value()
+				if tag == "" {
+					m.errorMessage = "Error: response given by radio API is empty or error"
+					fmt.Println(m.errorMessage)
+				}
+
 				station, err := parse.FindStation(tag)
 				if err != nil {
-					fmt.Printf("\nError: %v\n", err)
-					fmt.Println("Rebuilding list of radio stations...")
+					fmt.Println(err)
 					parse.ParseStations()
-					return m, cmd
+					return m, nil
+
 				}
+
 				m.radioStation = *station
+
 				// Stop the radio
 				if m.streamer != nil {
 					m.streamer.Close()
 					m.streamer = nil
-					m.playing = false
+					m.isPlaying = false
 				}
 
 				streamer, err := connect.ConnectRadio(m.radioStation.URL)
 				if err != nil {
-					// Handle the error
-					log.Fatal(err)
+					// Needs refactoring
+					fmt.Println("Can't connect to the radio")
+
 				}
 				m.streamer = streamer
-				// Reset song title after connecting to new station
+
 				m.songTitle = ""
-				m.playing = true
-				return m, cmd
-			default:
-				m.textInput, cmd = m.textInput.Update(msg)
-				return m, cmd
-			}
-		}
+				m.textInput.SetValue("")
+				cmds = append(cmds, doTick(m.radioStation.URL))
+				m.isPlaying = true
 
-	}
-
-	switch msg := msg.(type) {
-	case TickMsg:
-		if string(msg) == "" {
-			m.songTitle = `¯\_(ツ)_/¯`
-		} else {
-			m.songTitle = string(msg)
-		}
-		return m, doTick(m.radioStation.URL)
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c":
-			return m, tea.Quit
-		case "left", "h", "ctrl+b":
-			if m.cursor > 0 {
-				m.cursor--
-			}
-		case "right", "l", "ctrl+f":
-			if m.cursor < len(m.controls)-1 {
-				m.cursor++
-			}
-		case "enter", " ":
-			if m.cursor == 2 { // Exit
-				return m, tea.Quit
-			}
-
-			if m.cursor == 1 { // Search
-				// Switch to search mode
-				m.searching = true
-				return m, nil
-			}
-
-			if m.playing {
-				if m.streamer != nil {
+			} else if m.state == generalView {
+				// Stop the radio
+				if m.isPlaying {
 					m.streamer.Close()
 					m.streamer = nil
-					m.playing = false
+					m.songTitle = ""
+					m.isPlaying = false
+
+					// Play the radio
+				} else {
+					cmds = append(cmds, m.spinner.Tick)
+					m.isLoading = true
+					streamer, err := connect.ConnectRadio(m.radioStation.URL)
+					if err != nil {
+						// Handle the error
+						fmt.Println("Can't connect to the radio")
+
+					}
+					m.streamer = streamer
+					m.isLoading = false
+					// Reset song title after connecting to new station
+					cmds = append(cmds, doTick(m.radioStation.URL))
+					// After processing the tag, reset the input and hide it.
+					m.textInput.SetValue("")
+					m.isPlaying = true
 				}
-			} else {
-				streamer, err := connect.ConnectRadio(m.radioStation.URL)
-				if err != nil {
-					log.Fatal(err)
-				}
-				m.streamer = streamer
-				m.playing = true
 			}
 		}
+
+		switch m.state {
+		case searchView:
+			m.textInput, cmd = m.textInput.Update(msg)
+			cmds = append(cmds, cmd)
+		case generalView:
+			cmds = append(cmds, doTick(m.radioStation.URL))
+		}
+
+	case TickMsg:
+
+		m.songTitle = string(msg)
+
+		return m, doTick(m.radioStation.URL)
+
+	case spinner.TickMsg:
+		m.spinner, cmd = m.spinner.Update(msg)
+		cmds = append(cmds, cmd)
 	}
 
-	return m, cmd
+	return m, tea.Batch(cmds...)
+
 }
 
 // Describes View logic.
 func (m model) View() string {
-	s := ""
-	s += fmt.Sprintf("\n\n")
-	for i, control := range m.controls {
-		cursor := " "
-		if m.cursor == i {
-			cursor = ">"
-		}
+	var s string
 
-		if i == 0 {
-			if m.playing {
-				control = "⏸️ Pause"
-			} else {
-				control = "▶️ Play"
-			}
-		}
+	if m.isPlaying {
+		m.control = "⏸️ Pause"
+	} else {
+		m.control = "▶️ Play"
+		m.radioStation.Name = " "
+		m.songTitle = " "
 
-		s += fmt.Sprintf("%s %s", cursor, control)
 	}
-	if m.playing {
-		s += fmt.Sprintf("\n\n")
-		s += fmt.Sprintf("📻 Radio: %s\n", m.radioStation.Name)
+
+	s = "\n"
+	s += fmt.Sprintf("📻 Radio: %s\n", m.radioStation.Name)
+	s += "\n"
+	if m.songTitle == "" {
+		s += fmt.Sprintf("🎶 Track: %sLoading\n", m.spinner.View())
+	} else {
 		s += fmt.Sprintf("🎶 Track: %s\n", m.songTitle)
 	}
-	if m.searching {
+
+	if m.state == searchView {
 		s += "\n" + m.textInput.View()
+
 	}
-	if m.asking {
-		s += "\n" + m.answerInput.View()
+
+	if m.isLoading {
+		s += "\n" + m.spinner.View() + "Loading"
+
 	}
+	// Renders help string. ALWAYS needs to be rendered.
+	s += helpStyle.Render(fmt.Sprintf("\nTab: Search • Enter/Space: %s • Esc/q: exit\n", m.control))
 	return s
 }
 
 // Main goroutine
 func main() {
 
-	p := tea.NewProgram(initialModel())
+	p := tea.NewProgram(newModel())
 
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Alas, there's been an error: %v", err)

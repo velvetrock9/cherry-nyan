@@ -95,6 +95,7 @@ func ParseStations() error {
 }
 
 func FindStation(userTag string) (*Station, error) {
+	fmt.Printf("Searching stations with tag: %s", userTag)
 	f, err := os.ReadFile("stations.json")
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
