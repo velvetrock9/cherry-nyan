@@ -28,7 +28,6 @@ type model struct {
 	errorMessage string
 	songTitle    string
 	spinner      spinner.Model
-	isLoading    bool
 	isPlaying    bool
 }
 
@@ -42,13 +41,16 @@ var (
 )
 
 // Tick function, that regularly grabs metadata in ICE format from the same radio stream
-func doTick(radioStation string) tea.Cmd {
-	return tea.Tick(time.Second*7, func(t time.Time) tea.Msg {
-
-		message, err := icy.GrabSongTitle(radioStation)
-		if err != nil {
-			message = fmt.Sprintf("Error: %v", err)
+func doTick(radioStation string, condition bool) tea.Cmd {
+	return tea.Every(time.Second*7, func(t time.Time) tea.Msg {
+		if condition {
+			message, err := icy.GrabSongTitle(radioStation)
+			if err != nil {
+				message = fmt.Sprintf("Error: %v", err)
+			}
+			return TickMsg(message)
 		}
+		message := "Condition `isPlaying=True` hasn't been met"
 		return TickMsg(message)
 	})
 }
@@ -68,7 +70,6 @@ func newModel() model {
 	m.textInput.Width = 20
 
 	m.isPlaying = false
-	m.isLoading = false
 
 	m.radioStation = parse.Station{
 		URL:  "https://rautemusik-de-hz-fal-stream15.radiohost.de/12punks?ref=radiobrowser",
@@ -80,9 +81,7 @@ func newModel() model {
 }
 
 func (m model) Init() tea.Cmd {
-	cmds := make([]tea.Cmd, 0)
-	cmds = append(cmds, doTick(m.radioStation.URL), m.spinner.Tick)
-	return tea.Sequence(cmds...)
+	return nil
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -114,6 +113,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter", " ":
 			if m.state == searchView {
 				m.state = generalView
+				m.isPlaying = false
 				cmds = append(cmds, m.spinner.Tick)
 				tag := m.textInput.Value()
 				if tag == "" {
@@ -135,7 +135,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.streamer != nil {
 					m.streamer.Close()
 					m.streamer = nil
-					m.isPlaying = false
+					m.songTitle = ""
 				}
 
 				streamer, err := connect.ConnectRadio(m.radioStation.URL)
@@ -148,7 +148,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				m.songTitle = ""
 				m.textInput.SetValue("")
-				cmds = append(cmds, doTick(m.radioStation.URL))
+				cmds = append(cmds, doTick(m.radioStation.URL, m.isPlaying))
 				m.isPlaying = true
 
 			} else if m.state == generalView {
@@ -156,13 +156,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.isPlaying {
 					m.streamer.Close()
 					m.streamer = nil
-					m.songTitle = ""
 					m.isPlaying = false
+					m.songTitle = ""
 
 					// Play the radio
 				} else {
 					cmds = append(cmds, m.spinner.Tick)
-					m.isLoading = true
 					streamer, err := connect.ConnectRadio(m.radioStation.URL)
 					if err != nil {
 						// Handle the error
@@ -170,9 +169,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 					}
 					m.streamer = streamer
-					m.isLoading = false
 					// Reset song title after connecting to new station
-					cmds = append(cmds, doTick(m.radioStation.URL))
+					cmds = append(cmds, doTick(m.radioStation.URL, m.isPlaying))
 					// After processing the tag, reset the input and hide it.
 					m.textInput.SetValue("")
 					m.isPlaying = true
@@ -184,15 +182,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case searchView:
 			m.textInput, cmd = m.textInput.Update(msg)
 			cmds = append(cmds, cmd)
-		case generalView:
-			cmds = append(cmds, doTick(m.radioStation.URL))
 		}
 
 	case TickMsg:
+		var err error
+		m.songTitle, err = icy.GrabSongTitle(m.radioStation.URL)
+		if err != nil {
+			m.songTitle = fmt.Sprintf("Error: %v", err)
+		}
 
-		m.songTitle = string(msg)
-
-		return m, doTick(m.radioStation.URL)
+		cmds = append(cmds, doTick(m.radioStation.URL, m.isPlaying))
 
 	case spinner.TickMsg:
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -219,6 +218,8 @@ func (m model) View() string {
 	s = "\n"
 	s += fmt.Sprintf("📻 Radio: %s\n", m.radioStation.Name)
 	s += "\n"
+	s += fmt.Sprintf("📻 isPlaying: %t\n", m.isPlaying)
+	s += "\n"
 	if m.songTitle == "" {
 		s += fmt.Sprintf("🎶 Track: %sLoading\n", m.spinner.View())
 	} else {
@@ -230,10 +231,6 @@ func (m model) View() string {
 
 	}
 
-	if m.isLoading {
-		s += "\n" + m.spinner.View() + "Loading"
-
-	}
 	// Renders help string. ALWAYS needs to be rendered.
 	s += helpStyle.Render(fmt.Sprintf("\nTab: Search • Enter/Space: %s • Esc/q: exit\n", m.control))
 	return s
