@@ -37,7 +37,19 @@ const (
 )
 
 var (
-	helpStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	helpStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("241"))
+
+	searchStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#F4D35E"))
+
+	radioStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color("#083D77")).
+			Foreground(lipgloss.Color("#EBEBD3")).
+			Width(50)
+
+	radioContentStyle = lipgloss.NewStyle().
+				Bold(false)
 )
 
 // Tick function, that regularly grabs metadata in ICE format from the same radio stream
@@ -216,18 +228,20 @@ func (m model) View() string {
 	}
 
 	s = "\n"
-	s += fmt.Sprintf("📻 Radio: %s\n", m.radioStation.Name)
+	s += radioStyle.Render(
+		fmt.Sprintf("📻 Radio: %s\n", radioContentStyle.Render(m.radioStation.Name)))
 	s += "\n"
-	s += fmt.Sprintf("📻 isPlaying: %t\n", m.isPlaying)
+	s += radioStyle.Render(fmt.Sprintf("📻 isPlaying: %t\n", m.isPlaying))
+
 	s += "\n"
 	if m.songTitle == "" {
-		s += fmt.Sprintf("🎶 Track: %sLoading\n", m.spinner.View())
+		s += radioStyle.Render(fmt.Sprintf("🎶 Track: %sLoading\n", m.spinner.View()))
 	} else {
-		s += fmt.Sprintf("🎶 Track: %s\n", m.songTitle)
+		s += radioStyle.Render(fmt.Sprintf("🎶 Track: %s\n", radioContentStyle.Foreground(lipgloss.Color("#F78764")).Render(m.songTitle)))
 	}
 
 	if m.state == searchView {
-		s += "\n" + m.textInput.View()
+		s += "\n" + searchStyle.Render(m.textInput.View())
 
 	}
 
