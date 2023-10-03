@@ -57,6 +57,8 @@ func getStreamMetas(streamUrl string) ([]byte, error) {
 
 	reader := bufio.NewReader(resp.Body)
 
+	defer resp.Body.Close()
+
 	// skip the first mp3 frame
 	c, err := reader.Discard(ib)
 	if err != nil {

@@ -1,16 +1,17 @@
 package connect
 
 import (
-	"github.com/faiface/beep"
-	"github.com/faiface/beep/mp3"
-	"github.com/faiface/beep/speaker"
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/faiface/beep"
+	"github.com/faiface/beep/mp3"
+	"github.com/faiface/beep/speaker"
 )
 
 // Connects to chosen radio station http stream
-func ConnectRadio(url string) (beep.StreamSeekCloser, error) {
+func ConnectRadio(url string, connect bool) (beep.StreamSeekCloser, error) {
 
 	stream, err := http.Get(url)
 	if err != nil {
@@ -23,8 +24,11 @@ func ConnectRadio(url string) (beep.StreamSeekCloser, error) {
 	}
 
 	speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
-	speaker.Play(streamer)
-
+	if connect {
+		speaker.Play(streamer)
+	} else {
+		stream.Body.Close()
+	}
 	return streamer, nil
 
 }

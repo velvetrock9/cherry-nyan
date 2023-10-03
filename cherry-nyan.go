@@ -54,7 +54,7 @@ var (
 
 // Tick function, that regularly grabs metadata in ICE format from the same radio stream
 func doTick(radioStation string, condition bool) tea.Cmd {
-	return tea.Every(time.Second*7, func(t time.Time) tea.Msg {
+	return tea.Every(time.Second*1, func(t time.Time) tea.Msg {
 		if condition {
 			message, err := icy.GrabSongTitle(radioStation)
 			if err != nil {
@@ -150,7 +150,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.songTitle = ""
 				}
 
-				streamer, err := connect.ConnectRadio(m.radioStation.URL)
+				m.isPlaying = true
+				streamer, err := connect.ConnectRadio(m.radioStation.URL, m.isPlaying)
 				if err != nil {
 					// Needs refactoring
 					fmt.Println("Can't connect to the radio")
@@ -161,7 +162,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.songTitle = ""
 				m.textInput.SetValue("")
 				cmds = append(cmds, doTick(m.radioStation.URL, m.isPlaying))
-				m.isPlaying = true
 
 			} else if m.state == generalView {
 				// Stop the radio
@@ -174,7 +174,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Play the radio
 				} else {
 					cmds = append(cmds, m.spinner.Tick)
-					streamer, err := connect.ConnectRadio(m.radioStation.URL)
+					m.isPlaying = true
+					streamer, err := connect.ConnectRadio(m.radioStation.URL, m.isPlaying)
 					if err != nil {
 						// Handle the error
 						fmt.Println("Can't connect to the radio")
@@ -185,7 +186,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds, doTick(m.radioStation.URL, m.isPlaying))
 					// After processing the tag, reset the input and hide it.
 					m.textInput.SetValue("")
-					m.isPlaying = true
 				}
 			}
 		}
