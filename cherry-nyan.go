@@ -38,21 +38,19 @@ const (
 
 var (
 	helpStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241"))
-
+			Background(lipgloss.Color("#000AAA")).
+			Foreground(lipgloss.Color("241")).
+			Width(50)
 	searchStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#F4D35E"))
+			Background(lipgloss.Color("123")).
+			Width(50)
 
 	radioStyle = lipgloss.NewStyle().
 			Background(lipgloss.Color("#083D77")).
 			Foreground(lipgloss.Color("#EBEBD3")).
 			Width(50)
-
-	radioContentStyle = lipgloss.NewStyle().
-				Bold(false)
 )
 
-// Tick function, that regularly grabs metadata in ICE format from the same radio stream
 func doTick(radioStation string, condition bool) tea.Cmd {
 	return tea.Every(time.Second*1, func(t time.Time) tea.Msg {
 		if condition {
@@ -77,6 +75,7 @@ func newModel() model {
 
 	m.textInput = textinput.New()
 	m.textInput.Placeholder = "Enter search tag(rock / metal / pop / space / jungle / etc)"
+	m.textInput.PlaceholderStyle = searchStyle
 	m.textInput.Focus()
 	m.textInput.CharLimit = 156
 	m.textInput.Width = 20
@@ -229,15 +228,15 @@ func (m model) View() string {
 
 	s = "\n"
 	s += radioStyle.Render(
-		fmt.Sprintf("📻 Radio: %s\n", radioContentStyle.Render(m.radioStation.Name)))
+		fmt.Sprintf("📻 Radio: %s\n", m.radioStation.Name))
 	s += "\n"
 	s += radioStyle.Render(fmt.Sprintf("📻 isPlaying: %t\n", m.isPlaying))
 
 	s += "\n"
 	if m.songTitle == "" {
-		s += radioStyle.Render(fmt.Sprintf("🎶 Track: %sLoading\n", m.spinner.View()))
+		s += radioStyle.Render(fmt.Sprintf("🎶 Track: %sLoading", m.spinner.View()))
 	} else {
-		s += radioStyle.Render(fmt.Sprintf("🎶 Track: %s\n", radioContentStyle.Foreground(lipgloss.Color("#F78764")).Render(m.songTitle)))
+		s += radioStyle.Render(fmt.Sprintf("🎶 Track: %s", m.songTitle))
 	}
 
 	if m.state == searchView {
@@ -246,7 +245,7 @@ func (m model) View() string {
 	}
 
 	// Renders help string. ALWAYS needs to be rendered.
-	s += helpStyle.Render(fmt.Sprintf("\nTab: Search • Enter/Space: %s • Esc/q: exit\n", m.control))
+	s += "\n" + fmt.Sprintf("Tab: Search • Enter/Space: %s • Esc/q: exit\n", m.control)
 	return s
 }
 
