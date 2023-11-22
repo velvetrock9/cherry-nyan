@@ -15,11 +15,11 @@ func GrabSongTitle(url string) (string, error) {
 	m, err := getStreamMetas(url)
 
 	if err != nil {
-		return "", fmt.Errorf("Error: error while requesting stream ICY meta")
+		return "", fmt.Errorf("Error while requesting stream ICY meta")
 	}
 	// Should be at least "StreamTitle=' '"
 	if len(m) < 15 {
-		return "", fmt.Errorf("Error: StreamTitle is empty")
+		return "", fmt.Errorf("StreamTitle is empty")
 	}
 	// Split meta by ';', trim it and search for StreamTitle
 	for _, m := range bytes.Split(m, []byte(";")) {
@@ -56,6 +56,8 @@ func getStreamMetas(streamUrl string) ([]byte, error) {
 	}
 
 	reader := bufio.NewReader(resp.Body)
+
+	defer resp.Body.Close()
 
 	// skip the first mp3 frame
 	c, err := reader.Discard(ib)
